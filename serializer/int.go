@@ -1,0 +1,185 @@
+package serializer
+
+import (
+	"errors" // Für Fehlerdefinitionen
+	"fmt"
+	"strconv" // Für Integer/String-Konvertierung
+
+	// Importieren Sie das constraints-Paket. Der Pfad kann je nach Go-Version variieren.
+	// Für ältere Versionen: "golang.org/x/exp/constraints"
+	// Für Go 1.21+: "constraints" (eventuell, prüfen Sie Ihre Go-Version)
+	"golang.org/x/exp/constraints"
+	// "math" // Wird nicht benötigt, wenn wir uns auf strconv.ErrRange verlassen
+)
+
+// --- Annahme: Serializer[T any] Interface ist wie folgt definiert ---
+// type Serializer[T any] interface {
+//	 Marshal(v T) ([]byte, error)
+//	 Unmarshal(data []byte, target *T) error
+//	 Name() string
+// }
+
+// IntegerSerializer implementiert Serializer[T] für alle Standard-Integer-Typen.
+// Verwendet strconv zur Konvertierung nach/von String (Base 10).
+type IntegerSerializer[T constraints.Integer] struct{}
+
+// NewIntegerSerializer erstellt einen neuen Serializer für den gegebenen Integer-Typ T.
+func NewIntegerSerializer[T constraints.Integer]() Serializer[T] {
+	return &IntegerSerializer[T]{}
+}
+
+// Marshal konvertiert einen Integer-Wert T in seine String-Repräsentation (Base 10) als []byte.
+func (s *IntegerSerializer[T]) Marshal(v T) ([]byte, error) {
+	// Type Switch auf den konkreten Wert v vom Typ T
+	switch val := any(v).(type) {
+	// Signed Integer Types
+	case int:
+		// strconv.FormatInt erwartet int64, daher casten falls nötig
+		return []byte(strconv.FormatInt(int64(val), 10)), nil
+	case int8:
+		return []byte(strconv.FormatInt(int64(val), 10)), nil
+	case int16:
+		return []byte(strconv.FormatInt(int64(val), 10)), nil
+	case int32: // alias rune
+		return []byte(strconv.FormatInt(int64(val), 10)), nil
+	case int64:
+		return []byte(strconv.FormatInt(val, 10)), nil // Kein Cast nötig
+
+	// Unsigned Integer Types
+	case uint:
+		// strconv.FormatUint erwartet uint64, daher casten falls nötig
+		return []byte(strconv.FormatUint(uint64(val), 10)), nil
+	case uint8: // alias byte
+		return []byte(strconv.FormatUint(uint64(val), 10)), nil
+	case uint16:
+		return []byte(strconv.FormatUint(uint64(val), 10)), nil
+	case uint32:
+		return []byte(strconv.FormatUint(uint64(val), 10)), nil
+	case uint64:
+		return []byte(strconv.FormatUint(val, 10)), nil // Kein Cast nötig
+	case uintptr:
+		// uintptr wird wie uint64 behandelt für die String-Konvertierung
+		return []byte(strconv.FormatUint(uint64(val), 10)), nil
+
+	default:
+		// Dieser Fall sollte aufgrund des constraints.Integer Constraints theoretisch
+		// nicht erreichbar sein. Falls doch, deutet es auf ein Problem hin.
+		return nil, fmt.Errorf("unhandled type %T satisfies constraints.Integer in Marshal", v)
+	}
+}
+
+// Unmarshal parst eine String-Repräsentation (Base 10) in den Ziel-Integer-Pointer *T.
+// Verlässt sich auf strconv.ParseInt/ParseUint für die Bereichsprüfung mittels bitSize.
+func (s *IntegerSerializer[T]) Unmarshal(data []byte, v *T) error {
+	if v == nil {
+		return errors.New("integer unmarshal target cannot be nil")
+	}
+	// Konvertiere []byte zu string für strconv
+	strData := string(data)
+
+	// Type Switch auf den Pointer v vom Typ *T
+	switch ptr := any(v).(type) {
+	// Signed Integer Types
+	case *int:
+		// bitSize 0 -> Nutzt die native int-Größe (32 oder 64 bit) für ParseInt und Bereichsprüfung
+		i, err := strconv.ParseInt(strData, 10, 0)
+		if err != nil {
+			// Fehler verpacken für besseren Kontext
+			return fmt.Errorf("parsing '%s' as int failed: %w", strData, err)
+		}
+		*ptr = int(i) // Cast von int64 zum Zieltyp
+		return nil
+	case *int8:
+		// bitSize 8 -> Erzwingt Prüfung auf int8-Bereich durch ParseInt
+		i, err := strconv.ParseInt(strData, 10, 8)
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as int8 failed: %w", strData, err)
+		}
+		*ptr = int8(i) // Cast von int64 zum Zieltyp
+		return nil
+	case *int16:
+		i, err := strconv.ParseInt(strData, 10, 16) // bitSize 16
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as int16 failed: %w", strData, err)
+		}
+		*ptr = int16(i) // Cast von int64 zum Zieltyp
+		return nil
+	case *int32: // rune
+		i, err := strconv.ParseInt(strData, 10, 32) // bitSize 32
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as int32 failed: %w", strData, err)
+		}
+		*ptr = int32(i) // Cast von int64 zum Zieltyp
+		return nil
+	case *int64:
+		i, err := strconv.ParseInt(strData, 10, 64) // bitSize 64
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as int64 failed: %w", strData, err)
+		}
+		*ptr = i // Kein Cast nötig
+		return nil
+
+	// Unsigned Integer Types
+	case *uint:
+		// bitSize 0 -> Nutzt die native uint-Größe für ParseUint und Bereichsprüfung
+		u, err := strconv.ParseUint(strData, 10, 0)
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as uint failed: %w", strData, err)
+		}
+		*ptr = uint(u) // Cast von uint64 zum Zieltyp
+		return nil
+	case *uint8: // byte
+		u, err := strconv.ParseUint(strData, 10, 8) // bitSize 8
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as uint8 failed: %w", strData, err)
+		}
+		*ptr = uint8(u) // Cast von uint64 zum Zieltyp
+		return nil
+	case *uint16:
+		u, err := strconv.ParseUint(strData, 10, 16) // bitSize 16
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as uint16 failed: %w", strData, err)
+		}
+		*ptr = uint16(u) // Cast von uint64 zum Zieltyp
+		return nil
+	case *uint32:
+		u, err := strconv.ParseUint(strData, 10, 32) // bitSize 32
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as uint32 failed: %w", strData, err)
+		}
+		*ptr = uint32(u) // Cast von uint64 zum Zieltyp
+		return nil
+	case *uint64:
+		u, err := strconv.ParseUint(strData, 10, 64) // bitSize 64
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as uint64 failed: %w", strData, err)
+		}
+		*ptr = u // Kein Cast nötig
+		return nil
+	case *uintptr:
+		// bitSize 0 -> Nutzt die native uintptr-Größe für ParseUint und Bereichsprüfung
+		u, err := strconv.ParseUint(strData, 10, 0)
+		if err != nil {
+			return fmt.Errorf("parsing '%s' as uintptr failed: %w", strData, err)
+		}
+		*ptr = uintptr(u) // Cast von uint64 zum Zieltyp
+		return nil
+
+	default:
+		// Dieser Fall sollte theoretisch unerreichbar sein.
+		var zero T
+		return fmt.Errorf("unhandled type %T satisfies constraints.Integer in Unmarshal", zero)
+	}
+}
+
+// Name gibt den Namen des Serializers inklusive des spezifischen Integer-Typs zurück.
+func (s *IntegerSerializer[T]) Name() string {
+	// Erzeuge einen Nullwert von T, um dessen Typnamen zu bekommen
+	var t T
+	return fmt.Sprintf("IntegerSerializer[%T]", t)
+}
+
+// Compile-time interface satisfaction checks (Beispiele)
+var _ Serializer[int] = (*IntegerSerializer[int])(nil)
+var _ Serializer[uint32] = (*IntegerSerializer[uint32])(nil)
+var _ Serializer[byte] = (*IntegerSerializer[byte])(nil) // byte ist alias für uint8
