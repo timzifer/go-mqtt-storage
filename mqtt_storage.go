@@ -178,6 +178,7 @@ func (s *MQTTStorage) Publish(ctx context.Context, topic string, payload []byte)
 		Topic:   topic,
 		Payload: payload,
 		QoS:     s.pubQoS,
+		Retain:  true,
 	})
 	return err
 }
